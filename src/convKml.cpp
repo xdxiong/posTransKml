@@ -95,7 +95,7 @@ static void outpoint(FILE *fp, gtime_t time, const double *pos,
     fprintf(fp,"</Placemark>\n");
 }
 /* save kml file -------------------------------------------------------------*/
-static int savekml(const char *file, const solbuf_t *solbuf, int tcolor,
+static int savekml(char *file, const solbuf_t *solbuf, int tcolor,
                    int pcolor, int outalt, int outtime)
 {
     FILE *fp;
@@ -158,15 +158,16 @@ static int savekml(const char *file, const solbuf_t *solbuf, int tcolor,
 * return : status (0:ok,-1:file read,-2:file format,-3:no data,-4:file write)
 * notes  : see ref [1] for google earth kml file format
 *-----------------------------------------------------------------------------*/
-extern int convkml(const char *infile, const char *outfile, gtime_t ts,
+extern int convkml(char *infile[], char *outfile[], gtime_t ts,
                    gtime_t te, int nfile,double tint, int qflg, double *offset,
                    int tcolor, int pcolor, int outalt, int outtime)
 {
     solbuf_t solbuf={0};
     double rr[3]={0},pos[3],dr[3];
-    int i,j,stat;
+    int i,j,m,stat,ret;
     const char *p;
-    char file[1024];
+   // char file[MAXEXFILE][1024] = {0};
+    char *file[MAXEXFILE] = {0};
     char *files[MAXEXFILE] = { 0 };
     
     //trace(3,"convkml : infile=%s outfile=%s\n",infile,outfile);
@@ -177,42 +178,51 @@ extern int convkml(const char *infile, const char *outfile, gtime_t ts,
             for (i--;i>=0;i--) free(files[i]);
             return -4;
         }
+        if (!(file[i] = (char *)malloc(1024))) {
+            for (i--;i >= 0;i--) free(file[i]);
+            return -4;
+        }
     }
   
+    for (i = 0;i < nfile;i++) {
+        strcpy(files[i], infile[i]);
 
-    strcpy(files[0], infile);
-
-    if (!*outfile) {
-        if ((p=strrchr(infile,'.'))) {
-            strncpy(file,infile,p-infile);
-            strcpy(file+(p-infile),".kml");
+        if (!outfile) {
+            if ((p = strrchr(infile[i], '.'))) {
+                strncpy(file[i], infile[i], p - infile[i]);
+                strcpy(file[i] + (p - infile[i]), ".kml");
+            }
+            else sprintf(file[i], "%s.kml", infile);
         }
-        else sprintf(file,"%s.kml",infile);
+        else strcpy(file[i], outfile[i]);
+
+        /* read solution file */
+        stat = readsolt(files[i], 1, ts, te, tint, qflg, &solbuf);
+
+        if (!stat) {
+            free(&solbuf); 
+        }
+        else {
+            /* mean position */
+            for (m = 0;m<3;m++) {
+                for (j = 0;j<solbuf.n;j++) rr[m] += solbuf.data[j].rr[m];
+                rr[m] /= solbuf.n;
+            }
+            /* add offset */
+            ecef2pos(rr, pos);
+            enu2ecef(pos, offset, dr);
+            for (m = 0;m<solbuf.n;m++) {
+                for (j = 0;j<3;j++) solbuf.data[m].rr[j] += dr[j];
+            }
+            if (norm(solbuf.rb, 3)>0.0) {
+                for (m = 0;m<3;m++) solbuf.rb[m] += dr[m];
+            }
+            /* save kml file */
+            ret=savekml(file[i], &solbuf, tcolor, pcolor, outalt, outtime);
+            freesolbuf(&solbuf);
+        }  
+        free(files[i]);
+        free(file[i]);
     }
-    else strcpy(file,outfile);
-    
-    /* read solution file */
-    stat=readsolt(files,nfile,ts,te,tint,qflg,&solbuf);
-    
-    for (i=0;i<MAXEXFILE;i++) free(files[i]);
-    
-    if (!stat) {
-        return -1;
-    }
-    /* mean position */
-    for (i=0;i<3;i++) {
-        for (j=0;j<solbuf.n;j++) rr[i]+=solbuf.data[j].rr[i];
-        rr[i]/=solbuf.n;
-    }
-    /* add offset */
-    ecef2pos(rr,pos);
-    enu2ecef(pos,offset,dr);
-    for (i=0;i<solbuf.n;i++) {
-        for (j=0;j<3;j++) solbuf.data[i].rr[j]+=dr[j];
-    }
-    if (norm(solbuf.rb,3)>0.0) {
-        for (i=0;i<3;i++) solbuf.rb[i]+=dr[i];
-    }
-    /* save kml file */
-    return savekml(file,&solbuf,tcolor,pcolor,outalt,outtime)?0:-4;
+    return 1;
 }

@@ -146,7 +146,7 @@ extern void matmul(const char *tr, int n, int k, int m, double alpha,
                    const double *A, const double *B, double beta, double *C);
 
 
-extern int readsolt(char *files[], int nfile, gtime_t ts, gtime_t te,
+extern int readsolt(char *files, int nfile, gtime_t ts, gtime_t te,
     double tint, int qflag, solbuf_t *solbuf);
 
 
@@ -156,6 +156,7 @@ extern void covecef(const double *pos, const double *Q, double *P);
 extern int addsol(solbuf_t *solbuf, const sol_t *sol);
 extern void initsolbuf(solbuf_t *solbuf, int cyclic, int nmax);
 extern void pos2ecef(const double *pos, double *r);
+extern void freesolbuf(solbuf_t *solbuf);
 
 #ifdef __cplusplus
 }

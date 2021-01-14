@@ -79,8 +79,6 @@ static int decode_custom(char *buff, const solopt_t *opt, sol_t *sol)
     double dop=0.0;
     double utctime = 0.0;
     double t = 0.0;
-    __int64 lt;
-
 
     sscanf(buff, "%lf  %lf  %lf  %lf  %lf  %lf  %lf   %d %lf", &utctime, 
         val, val + 1, val + 2, val+3, val + 4, val + 5, &flag, &dop);
@@ -90,7 +88,6 @@ static int decode_custom(char *buff, const solopt_t *opt, sol_t *sol)
     pos[2] = val[2];
 
     sol->time.time = (__int64)(utctime);
-    printf("%ld\n",sol->time.time);
     sol->time.sec =  utctime-sol->time.time;
     pos2ecef(pos, sol->rr);
 
@@ -126,6 +123,8 @@ static int decode_solpos(char *buff, const solopt_t *opt, sol_t *sol)
 /* decode solution -----------------------------------------------------------*/
 static int decode_sol(char *buff, const solopt_t *opt, sol_t *sol, double *rb)
 {
+
+#if 0
     char *p;
 
     //trace(4, "decode_sol: buff=%s\n", buff);
@@ -144,6 +143,29 @@ static int decode_sol(char *buff, const solopt_t *opt, sol_t *sol, double *rb)
     //}
     /* decode position record */
     return decode_solpos(buff, opt, sol);
+#endif
+
+
+    double pos[3] = { 0 }, val[MAXFIELD] = { 0 }, std[3] = { 0 };
+    int flag = 0;
+    double dop = 0.0;
+    double utctime = 0.0;
+    double t = 0.0;
+
+    sscanf(buff, "%lf  %lf  %lf  %lf  %lf  %lf  %lf   %d %lf", &utctime,
+        val, val + 1, val + 2, val + 3, val + 4, val + 5, &flag, &dop);
+
+    pos[0] = val[0] * D2R; /* lat/lon/hgt (ddd.ddd) */
+    pos[1] = val[1] * D2R;
+    pos[2] = val[2];
+
+    sol->time.time = (__int64)(utctime);
+    sol->time.sec = utctime - sol->time.time;
+    pos2ecef(pos, sol->rr);
+
+    sol->stat = (uint8_t)val[6];
+
+    return 1;
 }
 /* decode solution options ---------------------------------------------------*/
 static void decode_solopt(char *buff, solopt_t *opt)
@@ -195,11 +217,7 @@ static void readsolopt(FILE *fp, solopt_t *opt)
     char buff[MAXSOLMSG + 1];
     int i;
 
-    //trace(3, "readsolopt:\n");
-
     for (i = 0;fgets(buff, sizeof(buff), fp) && i<100;i++) { /* only 100 lines */
-
-                                                             /* decode solution options */
         decode_solopt(buff, opt);
     }
 }
@@ -213,8 +231,6 @@ static void readsolopt(FILE *fp, solopt_t *opt)
 extern int addsol(solbuf_t *solbuf, const sol_t *sol)
 {
     sol_t *solbuf_data;
-
-    //trace(4, "addsol:\n");
 
     if (solbuf->cyclic) { /* ring buffer */
         if (solbuf->nmax <= 1) return 0;
@@ -230,7 +246,6 @@ extern int addsol(solbuf_t *solbuf, const sol_t *sol)
     if (solbuf->n >= solbuf->nmax) {
         solbuf->nmax = solbuf->nmax == 0 ? 8192 : solbuf->nmax * 2;
         if (!(solbuf_data = (sol_t *)realloc(solbuf->data, sizeof(sol_t)*solbuf->nmax))) {
-         //   trace(1, "addsol: memory allocation error\n");
             free(solbuf->data); solbuf->data = NULL; solbuf->n = solbuf->nmax = 0;
             return 0;
         }
@@ -255,8 +270,6 @@ extern int inputsol(uint8_t data, gtime_t ts, gtime_t te, double tint,
 {
     sol_t sol = { { 0 } };
     int stat;
-
-   // trace(4, "inputsol: data=0x%02x\n", data);
 
     sol.time = solbuf->time;
 
@@ -295,10 +308,7 @@ static int readsoldata(FILE *fp, gtime_t ts, gtime_t te, double tint, int qflag,
 {
     int c;
 
-    //trace(3, "readsoldata:\n");
-
     while ((c = fgetc(fp)) != EOF) {
-
         /* input solution */
         inputsol((uint8_t)c, ts, te, tint, qflag, opt, solbuf);
     }
@@ -368,6 +378,23 @@ extern void initsolbuf(solbuf_t *solbuf, int cyclic, int nmax)
     }
 }
 
+
+/* free solution ---------------------------------------------------------------
+* free memory for solution buffer
+* args   : solbuf_t *solbuf I  solution buffer
+* return : none
+*-----------------------------------------------------------------------------*/
+extern void freesolbuf(solbuf_t *solbuf)
+{
+    int i;
+    free(solbuf->data);
+    solbuf->n = solbuf->nmax = solbuf->start = solbuf->end = solbuf->nb = 0;
+    solbuf->data = NULL;
+    for (i = 0;i<3;i++) {
+        solbuf->rb[i] = 0.0;
+    }
+}
+
 /* read solutions data from solution files -------------------------------------
 * read solution data from soluiton files
 * args   : char   *files[]  I  solution files
@@ -379,7 +406,7 @@ extern void initsolbuf(solbuf_t *solbuf, int cyclic, int nmax)
 *          solbuf_t *solbuf O  solution buffer
 * return : status (1:ok,0:no data or error)
 *-----------------------------------------------------------------------------*/
-extern int readsolt(char *files[], int nfile, gtime_t ts, gtime_t te,
+extern int readsolt(char *files, int nfile, gtime_t ts, gtime_t te,
     double tint, int qflag, solbuf_t *solbuf)
 {
     FILE *fp;
@@ -391,7 +418,7 @@ extern int readsolt(char *files[], int nfile, gtime_t ts, gtime_t te,
     initsolbuf(solbuf, 0, 0);
 
     for (i = 0;i<nfile;i++) {
-        if (!(fp = fopen(files[i], "rb"))) {
+        if (!(fp = fopen(files, "rb"))) {
            // trace(2, "readsolt: file open error %s\n", files[i]);
             continue;
         }
@@ -407,14 +434,14 @@ extern int readsolt(char *files[], int nfile, gtime_t ts, gtime_t te,
     }
     return sort_solbuf(solbuf);
 }
-extern int readsol(char *files[], int nfile, solbuf_t *sol)
-{
-    gtime_t time = { 0 };
-
-    //trace(3, "readsol: nfile=%d\n", nfile);
-
-    return readsolt(files, nfile, time, time, 0.0, 0, sol);
-}
+//extern int readsol(char *files[], int nfile, solbuf_t *sol)
+//{
+//    gtime_t time = { 0 };
+//
+//    //trace(3, "readsol: nfile=%d\n", nfile);
+//
+//    return readsolt(files, nfile, time, time, 0.0, 0, sol);
+//}
 
 /* get solution data from solution buffer --------------------------------------
 * get solution data by index from solution buffer
@@ -433,21 +460,3 @@ extern sol_t *getsol(solbuf_t *solbuf, int index)
     return solbuf->data + index;
 }
 
-/* free solution ---------------------------------------------------------------
-* free memory for solution buffer
-* args   : solbuf_t *solbuf I  solution buffer
-* return : none
-*-----------------------------------------------------------------------------*/
-extern void freesolbuf(solbuf_t *solbuf)
-{
-    int i;
-
-  //  trace(3, "freesolbuf: n=%d\n", solbuf->n);
-
-    free(solbuf->data);
-    solbuf->n = solbuf->nmax = solbuf->start = solbuf->end = solbuf->nb = 0;
-    solbuf->data = NULL;
-    for (i = 0;i<3;i++) {
-        solbuf->rb[i] = 0.0;
-    }
-}
